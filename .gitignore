@@ -1,0 +1,19 @@
+# IDE ve sistem dosyaları
+.idea/
+.vscode/
+*.swp
+.DS_Store
+
+# Uygulama çıktıları ve gizli dosyalar
+/results/
+.env.local
+
+# Go ile ilgili
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+/vendor/ 

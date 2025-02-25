@@ -139,21 +139,43 @@ func sendEmail(content string) error {
 	return nil
 }
 
-func main() {
-	employeeFilter := flag.String("employee", "", "Çalışan adına göre filtrele (boş bırakılırsa tüm çalışanlar)")
-	dateFilter := flag.String("date", "", "Tarih filtresi ('daily' bugünü, 'YYYY-MM-DD' belirli bir günü filtreler)")
-	sendMailFlag := flag.Bool("sendMail", false, "Raporu e-posta olarak gönder")
-	flag.Parse()
+// Odoo kimlik doğrulama
+func authenticateOdoo() (*xmlrpc.Client, int, error) {
+	commonClient, err := xmlrpc.NewClient(fmt.Sprintf("%s/xmlrpc/2/common", os.Getenv("ODOO_BASE_URL")), nil)
+	if err != nil {
+		return nil, 0, err
+	}
 
+	var uid int
+	err = commonClient.Call("authenticate", []interface{}{
+		os.Getenv("ODOO_DB"),
+		os.Getenv("ODOO_USERNAME"),
+		os.Getenv("ODOO_PASSWORD"),
+		map[string]interface{}{},
+	}, &uid)
+	if err != nil {
+		return nil, 0, fmt.Errorf("authentication error: %v", err)
+	}
+
+	client, err := xmlrpc.NewClient(fmt.Sprintf("%s/xmlrpc/2/object", os.Getenv("ODOO_BASE_URL")), nil)
+	if err != nil {
+		return nil, 0, err
+	}
+
+	return client, uid, nil
+}
+
+// Rapor oluştur ve dosya adını döndür
+func generateReport(dateFilter, employeeFilter string, sendMailFlag bool) (string, error) {
 	// Çıktı dosyasını oluştur
 	now := time.Now()
 	if err := os.MkdirAll("results", 0755); err != nil {
-		log.Fatal("Results klasörü oluşturulamadı:", err)
+		return "", fmt.Errorf("results klasörü oluşturulamadı: %v", err)
 	}
 	outputFileName := fmt.Sprintf("results/result_%s.txt", now.Format("2006-01-02_15-04-05"))
 	outputFile, err := os.Create(outputFileName)
 	if err != nil {
-		log.Fatal("Çıktı dosyası oluşturulamadı:", err)
+		return "", fmt.Errorf("çıktı dosyası oluşturulamadı: %v", err)
 	}
 	defer outputFile.Close()
 
@@ -165,41 +187,24 @@ func main() {
 	if err != nil {
 		err = godotenv.Load()
 		if err != nil {
-			fmt.Fprintln(writer, "Error loading .env file")
-			log.Fatal(err)
+			return "", fmt.Errorf("error loading .env file: %v", err)
 		}
 	}
 
-	commonClient, err := xmlrpc.NewClient(fmt.Sprintf("%s/xmlrpc/2/common", os.Getenv("ODOO_BASE_URL")), nil)
+	client, uid, err := authenticateOdoo()
 	if err != nil {
-		log.Fatal(err)
-	}
-
-	var uid int
-	err = commonClient.Call("authenticate", []interface{}{
-		os.Getenv("ODOO_DB"),
-		os.Getenv("ODOO_USERNAME"),
-		os.Getenv("ODOO_PASSWORD"),
-		map[string]interface{}{},
-	}, &uid)
-	if err != nil {
-		log.Fatal("Authentication error:", err)
-	}
-
-	client, err := xmlrpc.NewClient(fmt.Sprintf("%s/xmlrpc/2/object", os.Getenv("ODOO_BASE_URL")), nil)
-	if err != nil {
-		log.Fatal(err)
+		return "", fmt.Errorf("Odoo kimlik doğrulama hatası: %v", err)
 	}
 
 	// Tarih filtresini ayarla
 	var startDate, endDate time.Time
-	if *dateFilter == "daily" {
+	if dateFilter == "daily" {
 		startDate = time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
 		endDate = startDate
-	} else if *dateFilter != "" {
-		startDate, err = time.Parse("2006-01-02", *dateFilter)
+	} else if dateFilter != "" {
+		startDate, err = time.Parse("2006-01-02", dateFilter)
 		if err != nil {
-			log.Fatal("Geçersiz tarih formatı. Doğru format: YYYY-MM-DD")
+			return "", fmt.Errorf("geçersiz tarih formatı. Doğru format: YYYY-MM-DD: %v", err)
 		}
 		endDate = startDate
 	} else {
@@ -244,7 +249,7 @@ func main() {
 		searchCriteria,
 	}, &count)
 	if err != nil {
-		log.Fatal("Error getting record count:", err)
+		return "", fmt.Errorf("error getting record count: %v", err)
 	}
 
 	fmt.Printf("Toplam kayıt sayısı: %d\n", count)
@@ -285,7 +290,7 @@ func main() {
 
 		wg.Add(1)
 		go func(recs []TimeSheetEntry) {
-			processRecords(recs, employeeFilter, employeeNames, resultChan, &wg, writer)
+			processRecords(recs, &employeeFilter, employeeNames, resultChan, &wg, writer)
 			progressChan <- len(recs)
 		}(records)
 	}
@@ -330,9 +335,9 @@ func main() {
 	fmt.Fprintln(writer, "\n=== Özet İstatistikler ===\n")
 	fmt.Fprintf(writer, "Toplam Çalışma Saati: %.2f\n\n", totalHours)
 
-	if *employeeFilter != "" {
+	if employeeFilter != "" {
 		// Tek bir çalışan için filtreleme yapıldığında
-		fmt.Fprintf(writer, "Çalışan: %s\n\n", *employeeFilter)
+		fmt.Fprintf(writer, "Çalışan: %s\n\n", employeeFilter)
 	} else {
 		// Tüm çalışanların toplam saatlerini listele
 		fmt.Fprintln(writer, "Çalışan Bazında Toplam Saatler:")
@@ -363,7 +368,7 @@ func main() {
 		sort.Float64s(employeeHoursList)
 
 		for emp, hours := range dailyHours[date] {
-			if *employeeFilter == "" || emp == *employeeFilter {
+			if employeeFilter == "" || emp == employeeFilter {
 				status := "Tam Çalışmış"
 				if hours < MinWorkHours {
 					status = "Az Çalışmış"
@@ -381,7 +386,7 @@ func main() {
 	fmt.Printf("\nRapor %s dosyasına kaydedildi.\n", outputFileName)
 
 	// E-posta gönderme kontrolü
-	if *sendMailFlag {
+	if sendMailFlag {
 		reportContent, err := os.ReadFile(outputFileName)
 		if err != nil {
 			log.Printf("Rapor dosyası okunamadı: %v", err)
@@ -393,5 +398,47 @@ func main() {
 				fmt.Println("Rapor e-posta olarak gönderildi.")
 			}
 		}
+	}
+
+	return outputFileName, nil
+}
+
+func main() {
+	employeeFilter := flag.String("employee", "", "Çalışan adına göre filtrele (boş bırakılırsa tüm çalışanlar)")
+	dateFilter := flag.String("date", "", "Tarih filtresi ('daily' bugünü, 'YYYY-MM-DD' belirli bir günü filtreler)")
+	sendMailFlag := flag.Bool("sendMail", false, "Raporu e-posta olarak gönder")
+	telegramFlag := flag.Bool("telegram", false, "Telegram bot'unu başlat")
+	flag.Parse()
+
+	// Telegram bot'unu başlat
+	if *telegramFlag {
+		// Önce .env.local dosyasını dene, yoksa .env dosyasını kullan
+		err := godotenv.Load(".env.local")
+		if err != nil {
+			err = godotenv.Load()
+			if err != nil {
+				log.Fatalf("Error loading .env file: %v", err)
+			}
+		}
+
+		// Telegram botunu başlat
+		err = InitTelegramBot()
+		if err != nil {
+			log.Fatalf("Telegram botu başlatılamadı: %v", err)
+		}
+
+		// Zamanlanmış görevleri başlat
+		StartScheduledJobs()
+
+		// Mesajları dinle
+		log.Println("Telegram mesajları dinleniyor...")
+		ListenForMessages()
+		return
+	}
+
+	// Normal rapor oluşturma
+	_, err := generateReport(*dateFilter, *employeeFilter, *sendMailFlag)
+	if err != nil {
+		log.Fatalf("Rapor oluşturulurken hata: %v", err)
 	}
 }

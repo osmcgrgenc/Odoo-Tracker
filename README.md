@@ -31,6 +31,12 @@ Bu uygulama, Odoo üzerindeki zaman çizelgesi (timesheet) kayıtlarını görü
 - SMTP üzerinden güvenli e-posta gönderimi
 - Özelleştirilebilir rapor formatı
 
+### Telegram Bot Entegrasyonu
+- Zamanlanmış otomatik raporlar (sabah 8:00 ve akşam 18:00)
+- Telegram üzerinden rapor sorgulama
+- Telegram üzerinden Odoo'ya zaman kaydı ekleme
+- Komut tabanlı etkileşimli arayüz
+
 ## Kurulum
 
 ### Ön Gereksinimler
@@ -38,6 +44,7 @@ Bu uygulama, Odoo üzerindeki zaman çizelgesi (timesheet) kayıtlarını görü
 - Git
 - Odoo erişimi
 - SMTP sunucu erişimi (e-posta gönderimi için)
+- Telegram Bot Token (Telegram özellikleri için)
 - İnternet bağlantısı
 
 ### Kurulum Adımları
@@ -82,6 +89,10 @@ mkdir results
    SMTP_USERNAME=your_email@domain.com
    SMTP_PASSWORD=your_app_password        # Gmail için App Password gerekli
    SMTP_FROM=your_email@domain.com
+   
+   # Telegram Bot Ayarları
+   TELEGRAM_BOT_TOKEN=your_bot_token      # BotFather'dan alınan token
+   TELEGRAM_CHAT_ID=your_chat_id          # Yetkili kullanıcının chat ID'si
    ```
 
 ## Kullanım
@@ -122,6 +133,36 @@ go run main.go -sendMail
 go run main.go -employee "Çalışan Adı" -date "2025-02-01" -sendMail
 ```
 
+### Telegram Bot Kullanımı
+
+1. Telegram Bot'unu Başlatma:
+```bash
+go run main.go -telegram
+```
+
+2. Bot Komutları:
+   - `/start` - Bot'u başlatır ve karşılama mesajı gönderir
+   - `/help` - Yardım menüsünü gösterir
+   - `/today` - Bugünün raporunu gösterir
+   - `/month` - Bu ayın raporunu gösterir
+   - `/add` - Zaman kaydı ekleme formatını gösterir
+
+3. Zaman Kaydı Ekleme:
+   Telegram üzerinden aşağıdaki formatta mesaj göndererek yeni zaman kaydı ekleyebilirsiniz:
+   ```
+   YYYY-MM-DD|Proje|Görev|Açıklama|Saat
+   ```
+   
+   Örnek:
+   ```
+   2025-02-07|TEKNOSA|CX-7006|Geliştirme yapıldı|3.5
+   ```
+   
+   Görev alanı opsiyoneldir, boş bırakabilirsiniz:
+   ```
+   2025-02-07|TEKNOSA||Geliştirme yapıldı|3.5
+   ```
+
 ## Parametreler
 
 ### Zorunlu Olmayan Parametreler
@@ -137,6 +178,10 @@ go run main.go -employee "Çalışan Adı" -date "2025-02-01" -sendMail
 - `-sendMail`: Raporu e-posta olarak gönderir
   - Parametre değeri gerekmez
   - Kullanılmazsa: E-posta gönderimi yapılmaz
+
+- `-telegram`: Telegram bot'unu başlatır
+  - Parametre değeri gerekmez
+  - Bot başlatıldığında, zamanlanmış görevler ve mesaj dinleme aktif olur
 
 ## Çıktı Formatı
 
@@ -174,6 +219,27 @@ go run main.go -employee "Çalışan Adı" -date "2025-02-01" -sendMail
 - Format: Düz metin
 - İçerik: Dosya ile aynı içerik
 
+### Telegram Raporu
+- Format: Markdown formatında özet
+- İçerik: Tarih aralığı, toplam çalışma saati, çalışan ve proje bazında saatler
+
+## Zamanlanmış Görevler
+
+Telegram bot modu aktif edildiğinde, aşağıdaki zamanlanmış görevler otomatik olarak çalışır:
+
+1. **Sabah Raporu**: Her gün sabah 08:00'de, o günün başlangıç raporu gönderilir.
+2. **Akşam Raporu**: Her gün akşam 18:00'de, günün özet raporu gönderilir.
+
+Bu raporlar, Telegram üzerinden belirtilen chat ID'ye otomatik olarak gönderilir.
+
+## Telegram Bot Kurulumu
+
+1. Telegram'da [@BotFather](https://t.me/BotFather) ile konuşarak yeni bir bot oluşturun.
+2. Bot token'ını alın ve `.env.local` dosyasına ekleyin.
+3. Bot ile özel mesaj başlatın ve bir mesaj gönderin.
+4. Tarayıcınızda `https://api.telegram.org/bot<TOKEN>/getUpdates` adresini ziyaret edin (TOKEN yerine kendi token'ınızı yazın).
+5. Gelen JSON yanıtından chat ID'nizi bulun ve `.env.local` dosyasına ekleyin.
+
 ## Hata Ayıklama
 
 ### Sık Karşılaşılan Hatalar
@@ -187,9 +253,10 @@ go run main.go -employee "Çalışan Adı" -date "2025-02-01" -sendMail
    - Kimlik bilgilerinin doğruluğunu kontrol edin
    - Session ID'nin güncelliğini kontrol edin
 
-3. Dosya İşlemi Hataları
-   - `results` klasörünün varlığını kontrol edin
-   - Yazma izinlerini kontrol edin
+3. Telegram Bot Hataları
+   - Bot token'ının doğruluğunu kontrol edin
+   - Chat ID'nin doğruluğunu kontrol edin
+   - Botun gerekli izinlere sahip olduğunu kontrol edin
 
 ## Bağımlılıklar
 
@@ -197,6 +264,8 @@ go run main.go -employee "Çalışan Adı" -date "2025-02-01" -sendMail
 - `github.com/joho/godotenv`: Ortam değişkenleri yönetimi
 - `github.com/kolo/xmlrpc`: Odoo API iletişimi
 - `github.com/schollz/progressbar/v3`: İlerleme çubuğu
+- `github.com/go-telegram-bot-api/telegram-bot-api/v5`: Telegram Bot API
+- `github.com/robfig/cron/v3`: Zamanlanmış görevler
 
 ### Sistem Gereksinimleri
 - İşletim Sistemi: Linux, macOS, Windows
@@ -209,11 +278,13 @@ go run main.go -employee "Çalışan Adı" -date "2025-02-01" -sendMail
 - `.env.local` dosyası `.gitignore`'a eklenmiştir
 - Şifreler ve API anahtarları asla kaynak kodda saklanmaz
 - SMTP iletişimi TLS/SSL ile şifrelenir
+- Telegram bot sadece belirtilen chat ID'den gelen mesajları işler
 
 ### En İyi Uygulamalar
 - Düzenli olarak Odoo ve SMTP şifrelerini güncelleyin
 - Uygulama şifresi kullanın (özellikle Gmail için)
 - Hassas dosyaları yedekleyin
+- Telegram bot token'ını kimseyle paylaşmayın
 
 ## Lisans
 
